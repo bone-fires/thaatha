@@ -6,43 +6,53 @@
 
 
 ## AAISHA
-### Team Name: [Name]
+### Team Name: THAATHA
 
 
 ### Team Members
-- Team Lead: [Name] - [College]
-- Member 2: [Name] - [College]
-- Member 3: [Name] - [College]
+- Team Lead: ADWAITH H A - TKM College of Engineering, Kollam
+- Member 2: AAISHA SIDHIK - TKM College of Engineering, Kollam
 
 ### Project Description
-[2-3 lines about what your project does]
+Laptop Thermal Control Bridge connects a GitHub Pages dashboard to a lightweight local Windows agent. The dashboard provides live thermal telemetry, a configurable cooling-floor control, and an on-demand thermal stress test, while the local agent safely communicates with laptop hardware.
+The web interface is hosted directly through GitHub Pages, and the standalone local agent is distributed through GitHub Releases.
 
 ### The Problem (that doesn't exist)
-[What ridiculous problem are you solving?]
+Your laptop’s firmware already manages its fans, but it refuses to let you micromanage them while you are compiling code, running benchmarks, or pretending that opening 47 browser tabs is a valid stress test.
+The ridiculous problem: How can you manually demand more cooling from your laptop without building a full desktop application or surrendering your hardware controls to a mysterious cloud service?
 
 ### The Solution (that nobody asked for)
-[How are you solving it? Keep it fun!]
+Laptop Thermal Control Bridge places a stylish browser dashboard in front of a local hardware-control agent. The browser handles the controls and visualisation; the local .exe handles the hardware interaction that browsers are not allowed to perform.
+The system enforces a cooling floor only: it can raise fan speeds above the firmware default, but it will never reduce them below the BIOS safety curve. If the dashboard closes, the connection drops, or the agent stops, fan control immediately returns to the laptop’s default firmware behaviour.
+
 
 ## Technical Details
 ### Technologies/Components Used
 For Software:
-- [Languages used]
-- [Frameworks used]
-- [Libraries used]
-- [Tools used]
+- Languages used: Python (local agent), JavaScript/TypeScript
+- Frameworks used: FastAPI (local agent API), React or vanilla JS
+- Libraries used: psutil, pywin32/OpenHardwareMonitor (thermal/fan access), requests/fetch (HTTP comms)
+- Tools used: GitHub Pages (hosting), GitHub Releases (distribution), PyInstaller (executable bundling)
 
 For Hardware:
-- [List main components]
-- [List specifications]
-- [List tools required]
+- (Not applicable – this is a pure software project interfacing with existing laptop hardware.)
 
 ### Implementation
 For Software:
 # Installation
-[commands]
+ # Clone the repo
+ git clone https://github.com/yourusername/laptop-thermal-bridge.git
+ cd laptop-thermal-bridge
+ # Install agent dependencies
+ pip install -r requirements.txt
+ # Build the executable (optional)
+ pyinstaller --onefile agent.py
 
 # Run
-[commands]
+ # Start the local agent
+ python agent.py
+ # Open the dashboard (GitHub Pages link)
+ # https://yourusername.github.io/laptop-thermal-bridge/
 
 ### Project Documentation
 For Software:
@@ -89,10 +99,8 @@ For Hardware:
 [Add any extra demo materials/links]
 
 ## Team Contributions
-- [Name 1]: [Specific contributions]
-- [Name 2]: [Specific contributions]
-- [Name 3]: [Specific contributions]
-
+- Adwaith H A: Local agent development (Python/FastAPI), hardware interfacing, executable packaging
+-Aaisha Sidhik: [Specific contributions] Dashboard UI/UX, GitHub Pages deployment, documentation 
 ---
 Made with ❤️ at TinkerHub Useless Projects 
 
