@@ -1,61 +1,103 @@
-# Laptop Thermal Control Bridge
+<img width="1280" height="640" alt="git (1)" src="https://github.com/user-attachments/assets/8920b256-2ba8-4988-b824-5351134eb4bd" />
 
-This repository contains a static dashboard and a Windows local agent for
-reading laptop thermal sensors, applying a conservative fan-speed floor, and
-running bounded CPU heat workloads.
 
-## Repository layout
 
-```text
-thermal-bridge/
-  agent/                 .NET 8 Windows x64 local agent
-  web/                   GitHub Pages dashboard
-.github/workflows/
-  pages.yml              GitHub Pages deployment
-  release.yml            Windows release packaging
-```
+# icastfireball
 
-## Run the agent
 
-The agent requires Windows x64, the .NET 8 SDK for development, and
-Administrator privileges for LibreHardwareMonitor sensor and controller
-access.
+## AAISHA
+### Team Name: [Name]
 
-```powershell
-dotnet publish thermal-bridge/agent/LaptopThermalBridge.csproj `
-  -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=true -o thermal-bridge/publish
-```
 
-Run `thermal-bridge/publish/icastfireball.exe` as Administrator. The agent
-listens only on `127.0.0.1:9876` and accepts the configured GitHub Pages
-origin.
+### Team Members
+- Team Lead: [Name] - [College]
+- Member 2: [Name] - [College]
+- Member 3: [Name] - [College]
 
-## Dashboard and releases
+### Project Description
+[2-3 lines about what your project does]
 
-Pushes to `main` deploy `thermal-bridge/web` through GitHub Pages. Tags named
-`v*` build and attach `icastfireball.exe` to a GitHub Release. The dashboard
-downloads the latest asset from:
+### The Problem (that doesn't exist)
+[What ridiculous problem are you solving?]
 
-`https://github.com/bone-fires/thaatha/releases/latest/download/icastfireball.exe`
+### The Solution (that nobody asked for)
+[How are you solving it? Keep it fun!]
 
-Enable GitHub Pages with **Source: GitHub Actions** in the repository settings.
+## Technical Details
+### Technologies/Components Used
+For Software:
+- [Languages used]
+- [Frameworks used]
+- [Libraries used]
+- [Tools used]
 
-## Safety and compatibility
+For Hardware:
+- [List main components]
+- [List specifications]
+- [List tools required]
 
-- Fan control is intended to be floor-only: a requested floor must never be
-  used to lower a firmware-controlled speed.
-- Unsupported or unverifiable fan-control hardware must remain on BIOS/EC
-  automatic control.
-- Closing the agent or losing the dashboard connection stops stress workers
-  and attempts to restore automatic fan control.
-- Only one dashboard session is accepted at a time.
-- OEM utilities such as Armoury Crate or Lenovo Vantage may compete for fan
-  control and should be closed during testing.
-- `ws://127.0.0.1` from an HTTPS Pages site may be blocked by browser
-  mixed-content policy. Verify this in the target browser before release; a
-  secure local transport may be required.
+### Implementation
+For Software:
+# Installation
+[commands]
 
-Do not use the fan override on hardware that has not been tested with a safe
-restore path. A process crash, forced termination, power loss, or firmware
-failure cannot guarantee cleanup code will execute.
+# Run
+[commands]
+
+### Project Documentation
+For Software:
+
+# Screenshots (Add at least 3)
+![Screenshot1](Add screenshot 1 here with proper name)
+*Add caption explaining what this shows*
+
+![Screenshot2](Add screenshot 2 here with proper name)
+*Add caption explaining what this shows*
+
+![Screenshot3](Add screenshot 3 here with proper name)
+*Add caption explaining what this shows*
+
+# Diagrams
+![Workflow](Add your workflow/architecture diagram here)
+*Add caption explaining your workflow*
+
+For Hardware:
+
+# Schematic & Circuit
+![Circuit](Add your circuit diagram here)
+*Add caption explaining connections*
+
+![Schematic](Add your schematic diagram here)
+*Add caption explaining the schematic*
+
+# Build Photos
+![Components](Add photo of your components here)
+*List out all components shown*
+
+![Build](Add photos of build process here)
+*Explain the build steps*
+
+![Final](Add photo of final product here)
+*Explain the final build*
+
+### Project Demo
+# Video
+[Add your demo video link here]
+*Explain what the video demonstrates*
+
+# Additional Demos
+[Add any extra demo materials/links]
+
+## Team Contributions
+- [Name 1]: [Specific contributions]
+- [Name 2]: [Specific contributions]
+- [Name 3]: [Specific contributions]
+
+---
+Made with ❤️ at TinkerHub Useless Projects 
+
+![Static Badge](https://img.shields.io/badge/TinkerHub-24?color=%23000000&link=https%3A%2F%2Fwww.tinkerhub.org%2F)
+![Static Badge](https://img.shields.io/badge/UselessProjects--26-26?link=https%3A%2F%2Ftinkerhub.org%2Fevents%2F1M8ORET9A1%2Fuseless-projects-3.0)
+
+
+
