@@ -392,7 +392,7 @@ internal sealed class HardwareManager : IDisposable
                 {
                     if (sensor.SensorType == SensorType.Control && sensor.Control is not null)
                     {
-                        var baseline = sensor.Control.SoftwareValue ?? sensor.Value ?? 0f;
+                        var baseline = sensor.Control.SoftwareValue;
                         _fanChannels.Add(new FanChannel(sensor, baseline));
                     }
                     else if (sensor.SensorType == SensorType.Fan)
@@ -439,16 +439,16 @@ internal sealed class HardwareManager : IDisposable
                     // Nothing to override - hand control back to the EC entirely.
                     channel.Sensor.Control!.SetDefault();
                 }
-            foreach (var sub in hardware.SubHardware) sub.Update();
+                else
+                {
+                    channel.Sensor.Control!.SetSoftware(target);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    ! Failed to set fan channel: {ex.Message}");
+            }
         }
-
-        foreach (var channel in _fanChannels)
-        {
-            var fresh = channel.Sensor.Value ?? channel.BiosDefaultPercent;
-            channel.BiosDefaultPercent = fresh;
-        }
-
-        EnforceFloor();
     }
 
     public TelemetrySnapshot ReadTelemetry()
