@@ -20,6 +20,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="DellSmbiosBzhLib">
+      <HintPath>DellSmbiosBzhLib.dll</HintPath>
+    </Reference>
+    <None Include="bzh_dell_smm_io_x64.sys">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+
     <!-- Hardware sensor + fan control access -->
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.4" />
 

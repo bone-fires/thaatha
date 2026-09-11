@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using LibreHardwareMonitor.Hardware;
+using DellFanManagement.DellSmbiozBzhLib;
 
 namespace LaptopThermalBridge;
 
@@ -332,37 +333,46 @@ internal sealed class TelemetryMessage
 }
 
 // =====================================================================
-// Hardware access via LibreHardwareMonitor - the ONLY place that talks
-// to sensors/fan controls. Implements the floor-only rule.
+// Hardware access via LibreHardwareMonitor (for CPU temp) and 
+// DellSmbiosBzh (for Fan Control bypass).
 // =====================================================================
 internal sealed class HardwareManager : IDisposable
 {
     private readonly Computer _computer;
     private readonly object _lock = new();
-    private readonly List<FanChannel> _fanChannels = new();
     private ISensor? _cpuTempSensor;
 
     private int _userFloorPercent; // 0-100, from the UI slider
     private Timer? _controlLoopTimer;
-
-    public void Initialize()
-    {
-        _computer.Open();
-        DiscoverSensors();
-
-        // Enforce the floor continuously.
-        _controlLoopTimer = new Timer(_ => EnforceFloor(), null, 0, 1000);
-
-    }
 
     public HardwareManager()
     {
         _computer = new Computer
         {
             IsCpuEnabled = true,
-            IsMotherboardEnabled = true, // fan controllers usually live under the motherboard/SuperIO
+            IsMotherboardEnabled = true,
             IsControllerEnabled = true
         };
+    }
+
+    public void Initialize()
+    {
+        _computer.Open();
+        DiscoverSensors();
+
+        try
+        {
+            DellSmbiosBzh.Initialize();
+            Console.WriteLine("[+] Loaded Dell SMBIOS ring0 bypass driver successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[!] Failed to load Dell SMBIOS bypass driver: {ex.Message}");
+            Console.WriteLine("    Make sure Windows Memory Integrity (Core Isolation) is disabled!");
+        }
+
+        // Enforce the floor continuously.
+        _controlLoopTimer = new Timer(_ => EnforceFloor(), null, 0, 1000);
     }
 
     private void DiscoverSensors()
@@ -383,27 +393,8 @@ internal sealed class HardwareManager : IDisposable
                     }
                 }
             }
-
-            // Fan controls typically surface under Motherboard -> SubHardware (SuperIO/EC).
-            foreach (var sub in hardware.SubHardware)
-            {
-                sub.Update();
-                foreach (var sensor in sub.Sensors)
-                {
-                    if (sensor.SensorType == SensorType.Control && sensor.Control is not null)
-                    {
-                        var baseline = sensor.Control.SoftwareValue;
-                        _fanChannels.Add(new FanChannel(sensor, baseline));
-                    }
-                    else if (sensor.SensorType == SensorType.Fan)
-                    {
-                        // paired RPM sensor, matched by index proximity; used for readout only
-                    }
-                }
-            }
         }
 
-        Console.WriteLine($"Detected {_fanChannels.Count} controllable fan channel(s).");
         Console.WriteLine(_cpuTempSensor is null
             ? "WARNING: could not find a CPU package temperature sensor."
             : $"CPU temperature sensor: {_cpuTempSensor.Name}");
@@ -418,36 +409,29 @@ internal sealed class HardwareManager : IDisposable
         EnforceFloor();
     }
 
-    /// <summary>
-    /// The Floor-Only Rule: TargetPWM = MAX(BIOS_Default_PWM, User_Floor_Override_PWM).
-    /// We never command a fan slower than either the EC's own auto curve
-    /// or the user's requested floor - only ever push speed up.
-    /// </summary>
     private void EnforceFloor()
     {
         int floor;
         lock (_lock) { floor = _userFloorPercent; }
 
-        foreach (var channel in _fanChannels)
+        try
         {
-            try
+            if (floor == 0)
             {
-                var target = Math.Max(channel.BiosDefaultPercent, floor);
-
-                if (target <= channel.BiosDefaultPercent && floor == 0)
-                {
-                    // Nothing to override - hand control back to the EC entirely.
-                    channel.Sensor.Control!.SetDefault();
-                }
-                else
-                {
-                    channel.Sensor.Control!.SetSoftware(target);
-                }
+                DellSmbiosBzh.EnableAutomaticFanControl();
             }
-            catch (Exception ex)
+            else
             {
-                Console.WriteLine($"    ! Failed to set fan channel: {ex.Message}");
+                DellSmbiosBzh.DisableAutomaticFanControl();
+                var level = floor >= 50 ? BzhFanLevel.Level2 : BzhFanLevel.Level1;
+                
+                DellSmbiosBzh.SetFanLevel(BzhFanIndex.Fan1, level);
+                try { DellSmbiosBzh.SetFanLevel(BzhFanIndex.Fan2, level); } catch { }
             }
+        }
+        catch (Exception)
+        {
+            // Suppress repeating errors in loop, just let it fail silently after first init error
         }
     }
 
@@ -456,23 +440,16 @@ internal sealed class HardwareManager : IDisposable
         foreach (var hardware in _computer.Hardware)
         {
             hardware.Update();
-            foreach (var sub in hardware.SubHardware) sub.Update();
         }
 
         float temp = _cpuTempSensor?.Value ?? 0f;
         int rpm = 0;
 
-        foreach (var hardware in _computer.Hardware)
+        try
         {
-            foreach (var sub in hardware.SubHardware)
-            {
-                var fanSensor = sub.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Fan);
-                if (fanSensor?.Value is float v)
-                {
-                    rpm = Math.Max(rpm, (int)v);
-                }
-            }
+            rpm = (int)(DellSmbiosBzh.GetFanRpm(BzhFanIndex.Fan1) ?? 0);
         }
+        catch { }
 
         int floor;
         lock (_lock) { floor = _userFloorPercent; }
@@ -483,33 +460,18 @@ internal sealed class HardwareManager : IDisposable
     public void ReleaseAllOverrides()
     {
         lock (_lock) { _userFloorPercent = 0; }
-
-        foreach (var channel in _fanChannels)
-        {
-            try { channel.Sensor.Control!.SetDefault(); }
-            catch { }
-        }
+        try { DellSmbiosBzh.EnableAutomaticFanControl(); } catch { }
     }
 
     public void Dispose()
     {
         _controlLoopTimer?.Dispose();
         ReleaseAllOverrides();
+        try { DellSmbiosBzh.Shutdown(); } catch { }
         try { _computer.Close(); } catch { }
     }
-
-    private sealed class FanChannel
-    {
-        public ISensor Sensor { get; }
-        public float BiosDefaultPercent { get; set; }
-
-        public FanChannel(ISensor sensor, float biosDefaultPercent)
-        {
-            Sensor = sensor;
-            BiosDefaultPercent = biosDefaultPercent;
-        }
-    }
 }
+
 
 internal readonly record struct TelemetrySnapshot(float CpuTempC, int FanRpm, int CurrentFloorPercent);
 
