@@ -174,6 +174,11 @@ function setConnectedUi(connected) {
 }
 
 function renderTelemetry(msg) {
+  lastTelemetry = msg;
+  if (isEmergencyHovered) {
+    return; // hold visual preview while emergency button is hovered
+  }
+
   // 1. CPU Temp
   if (typeof msg.cpuTemp === "number") {
     cpuTempEl.textContent = msg.cpuTemp.toFixed(1);
@@ -181,13 +186,13 @@ function renderTelemetry(msg) {
     cpuTempBar.style.width = `${pct}%`;
 
     if (msg.cpuTemp >= 85) {
-      tempBadge.textContent = "🔥 Meltdown";
+      tempBadge.textContent = "CRITICAL";
       tempBadge.className = "badge badge-fire";
     } else if (msg.cpuTemp >= 75) {
-      tempBadge.textContent = "Warning";
+      tempBadge.textContent = "WARNING";
       tempBadge.className = "badge badge-warn";
     } else {
-      tempBadge.textContent = "Normal";
+      tempBadge.textContent = "NOMINAL";
       tempBadge.className = "badge badge-normal";
     }
   }
@@ -286,8 +291,27 @@ presetBtns.forEach(btn => {
   });
 });
 
-// Comprehensive Emergency Stop (Resets all controls instantly)
+// Heating Bar Resets to Zero on Hover & Instant Shutdown on Click
+let isEmergencyHovered = false;
+let lastTelemetry = null;
+
+emergencyStopBtn.addEventListener("mouseenter", () => {
+  isEmergencyHovered = true;
+  cpuLoadBar.style.width = "0%";
+  cpuLoadEl.textContent = "0";
+  floorValue.textContent = "0%";
+  floorSlider.value = "0";
+});
+
+emergencyStopBtn.addEventListener("mouseleave", () => {
+  isEmergencyHovered = false;
+  if (lastTelemetry) {
+    renderTelemetry(lastTelemetry);
+  }
+});
+
 emergencyStopBtn.addEventListener("click", () => {
+  isEmergencyHovered = false;
   if (document.activeElement) {
     document.activeElement.blur();
   }
@@ -296,6 +320,8 @@ emergencyStopBtn.addEventListener("click", () => {
   floorValue.textContent = "0%";
   threadSlider.value = "1";
   threadValue.textContent = "1";
+  cpuLoadBar.style.width = "0%";
+  cpuLoadEl.textContent = "0";
   send({ type: "emergency_stop" });
 });
 
