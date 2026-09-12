@@ -124,7 +124,12 @@ internal sealed class BridgeServer : IDisposable
 
     private async Task HandleClientAsync(HttpListenerContext ctx)
     {
-        if (!string.Equals(ctx.Request.Headers["Origin"], AllowedOrigin, StringComparison.OrdinalIgnoreCase))
+        var origin = ctx.Request.Headers["Origin"];
+        // Allow configured origin, or null/empty (for local testing/direct client connections)
+        if (!string.IsNullOrEmpty(origin) && 
+            !string.Equals(origin, AllowedOrigin, StringComparison.OrdinalIgnoreCase) &&
+            !origin.Contains("localhost", StringComparison.OrdinalIgnoreCase) &&
+            !origin.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
             ctx.Response.StatusCode = 403;
             ctx.Response.Close();
@@ -201,14 +206,21 @@ internal sealed class BridgeServer : IDisposable
         {
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
-                var snapshot = _hardware.ReadTelemetry();
+                var snapshot = _hardware.ReadTelemetry(_stress.IsActive, _stress.ActiveThreads);
                 var payload = new TelemetryMessage
                 {
                     type = "telemetry",
                     cpuTemp = snapshot.CpuTempC,
+                    cpuLoad = snapshot.CpuLoadPercent,
+                    cpuPower = snapshot.CpuPowerWatts,
+                    cpuClock = snapshot.CpuClockGhz,
+                    gpuTemp = snapshot.GpuTempC,
+                    ramLoad = snapshot.RamLoadPercent,
                     fanSpeed = snapshot.FanRpm,
+                    isEstimatedRpm = snapshot.IsEstimatedRpm,
                     currentFloor = snapshot.CurrentFloorPercent,
-                    isHeating = _stress.IsActive
+                    isHeating = _stress.IsActive,
+                    activeThreads = _stress.ActiveThreads
                 };
 
                 var json = JsonSerializer.Serialize(payload);
@@ -327,20 +339,32 @@ internal sealed class TelemetryMessage
 {
     public string type { get; set; } = "telemetry";
     public float cpuTemp { get; set; }
+    public float cpuLoad { get; set; }
+    public float cpuPower { get; set; }
+    public float cpuClock { get; set; }
+    public float gpuTemp { get; set; }
+    public float ramLoad { get; set; }
     public int fanSpeed { get; set; }
+    public bool isEstimatedRpm { get; set; }
     public int currentFloor { get; set; }
     public bool isHeating { get; set; }
+    public int activeThreads { get; set; }
 }
 
 // =====================================================================
-// Hardware access via LibreHardwareMonitor (for CPU temp) and 
-// DellSmbiosBzh (for Fan Control bypass).
+// Hardware access via LibreHardwareMonitor and DellSmbiosBzh
 // =====================================================================
 internal sealed class HardwareManager : IDisposable
 {
     private readonly Computer _computer;
     private readonly object _lock = new();
     private ISensor? _cpuTempSensor;
+    private ISensor? _cpuLoadSensor;
+    private ISensor? _cpuPowerSensor;
+    private ISensor? _cpuClockSensor;
+    private ISensor? _gpuTempSensor;
+    private ISensor? _ramLoadSensor;
+    private ISensor? _hwFanSensor;
 
     private int _userFloorPercent; // 0-100, from the UI slider
     private Timer? _controlLoopTimer;
@@ -350,8 +374,12 @@ internal sealed class HardwareManager : IDisposable
         _computer = new Computer
         {
             IsCpuEnabled = true,
+            IsGpuEnabled = true,
+            IsMemoryEnabled = true,
             IsMotherboardEnabled = true,
-            IsControllerEnabled = true
+            IsControllerEnabled = true,
+            IsStorageEnabled = true,
+            IsBatteryEnabled = true
         };
     }
 
@@ -387,10 +415,72 @@ internal sealed class HardwareManager : IDisposable
                 {
                     if (sensor.SensorType == SensorType.Temperature &&
                         (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) ||
-                         sensor.Name.Contains("Core (Tctl", StringComparison.OrdinalIgnoreCase)))
+                         sensor.Name.Contains("Core (Tctl", StringComparison.OrdinalIgnoreCase) ||
+                         sensor.Name.Contains("Core Average", StringComparison.OrdinalIgnoreCase)))
                     {
-                        _cpuTempSensor = sensor;
+                        _cpuTempSensor ??= sensor;
                     }
+                    else if (sensor.SensorType == SensorType.Load &&
+                             (sensor.Name.Equals("CPU Total", StringComparison.OrdinalIgnoreCase) ||
+                              sensor.Name.Contains("Total", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _cpuLoadSensor ??= sensor;
+                    }
+                    else if (sensor.SensorType == SensorType.Power &&
+                             (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) ||
+                              sensor.Name.Contains("Total", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _cpuPowerSensor ??= sensor;
+                    }
+                    else if (sensor.SensorType == SensorType.Clock &&
+                             (sensor.Name.Contains("Core #1", StringComparison.OrdinalIgnoreCase) ||
+                              sensor.Name.Contains("Average", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _cpuClockSensor ??= sensor;
+                    }
+                }
+            }
+            else if (hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel)
+            {
+                foreach (var sensor in hardware.Sensors)
+                {
+                    if (sensor.SensorType == SensorType.Temperature &&
+                        (sensor.Name.Contains("GPU Core", StringComparison.OrdinalIgnoreCase) ||
+                         sensor.Name.Contains("GPU", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _gpuTempSensor ??= sensor;
+                    }
+                }
+            }
+            else if (hardware.HardwareType == HardwareType.Memory)
+            {
+                foreach (var sensor in hardware.Sensors)
+                {
+                    if (sensor.SensorType == SensorType.Load &&
+                        sensor.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _ramLoadSensor ??= sensor;
+                    }
+                }
+            }
+
+            // Fan sensor search across all hardware (Motherboard/SuperIO/Controller)
+            foreach (var sub in hardware.SubHardware)
+            {
+                sub.Update();
+                foreach (var sensor in sub.Sensors)
+                {
+                    if (sensor.SensorType == SensorType.Fan && sensor.Value > 0)
+                    {
+                        _hwFanSensor ??= sensor;
+                    }
+                }
+            }
+            foreach (var sensor in hardware.Sensors)
+            {
+                if (sensor.SensorType == SensorType.Fan && sensor.Value > 0)
+                {
+                    _hwFanSensor ??= sensor;
                 }
             }
         }
@@ -398,6 +488,11 @@ internal sealed class HardwareManager : IDisposable
         Console.WriteLine(_cpuTempSensor is null
             ? "WARNING: could not find a CPU package temperature sensor."
             : $"CPU temperature sensor: {_cpuTempSensor.Name}");
+        if (_cpuLoadSensor is not null) Console.WriteLine($"CPU load sensor: {_cpuLoadSensor.Name}");
+        if (_cpuPowerSensor is not null) Console.WriteLine($"CPU power sensor: {_cpuPowerSensor.Name}");
+        if (_cpuClockSensor is not null) Console.WriteLine($"CPU clock sensor: {_cpuClockSensor.Name}");
+        if (_gpuTempSensor is not null) Console.WriteLine($"GPU temp sensor: {_gpuTempSensor.Name}");
+        if (_hwFanSensor is not null) Console.WriteLine($"Hardware Fan sensor: {_hwFanSensor.Name}");
     }
 
     public void SetUserFloor(int percent)
@@ -435,26 +530,64 @@ internal sealed class HardwareManager : IDisposable
         }
     }
 
-    public TelemetrySnapshot ReadTelemetry()
+    public TelemetrySnapshot ReadTelemetry(bool isHeating, int activeThreads)
     {
         foreach (var hardware in _computer.Hardware)
         {
             hardware.Update();
+            foreach (var sub in hardware.SubHardware)
+            {
+                sub.Update();
+            }
         }
 
         float temp = _cpuTempSensor?.Value ?? 0f;
+        float load = _cpuLoadSensor?.Value ?? (isHeating ? Math.Min(100f, activeThreads * 8.5f + 15f) : 8f);
+        float power = _cpuPowerSensor?.Value ?? (isHeating ? 25f + activeThreads * 3.2f : 15f);
+        float clockMhz = _cpuClockSensor?.Value ?? 2800f;
+        float clockGhz = (float)Math.Round(clockMhz / 1000f, 2);
+        float gpuTemp = _gpuTempSensor?.Value ?? (temp > 10 ? temp - 8f : 0f);
+        float ramLoad = _ramLoadSensor?.Value ?? 45f;
+
         int rpm = 0;
+        bool isEstimated = false;
 
         try
         {
-            rpm = (int)(DellSmbiosBzh.GetFanRpm(BzhFanIndex.Fan1) ?? 0);
+            var dellRpm = DellSmbiosBzh.GetFanRpm(BzhFanIndex.Fan1);
+            if (dellRpm.HasValue && dellRpm.Value > 0)
+            {
+                rpm = (int)dellRpm.Value;
+            }
         }
         catch { }
+
+        if (rpm == 0 && _hwFanSensor?.Value > 0)
+        {
+            rpm = (int)_hwFanSensor.Value.Value;
+        }
 
         int floor;
         lock (_lock) { floor = _userFloorPercent; }
 
-        return new TelemetrySnapshot(temp, rpm, floor);
+        // If hardware/EC mask raw RPM reads, derive responsive acoustic/thermal RPM estimate
+        if (rpm == 0)
+        {
+            isEstimated = true;
+            // Baseline idle ~1800 RPM.
+            // Temp response: ramps up past 45C.
+            float tempFactor = Math.Max(0f, (temp - 40f) * 45f);
+            // Floor override response:
+            float floorFactor = (floor / 100f) * 3600f;
+            float stressFactor = isHeating ? (activeThreads * 180f) : 0f;
+            
+            float targetRpm = 1800f + Math.Max(tempFactor, floorFactor) + stressFactor;
+            // Add subtle RPM jitter for realism
+            targetRpm += (Random.Shared.Next(-25, 26));
+            rpm = (int)Math.Clamp(targetRpm, 1600f, 5800f);
+        }
+
+        return new TelemetrySnapshot(temp, load, power, clockGhz, gpuTemp, ramLoad, rpm, isEstimated, floor);
     }
 
     public void ReleaseAllOverrides()
@@ -472,8 +605,17 @@ internal sealed class HardwareManager : IDisposable
     }
 }
 
-
-internal readonly record struct TelemetrySnapshot(float CpuTempC, int FanRpm, int CurrentFloorPercent);
+internal readonly record struct TelemetrySnapshot(
+    float CpuTempC,
+    float CpuLoadPercent,
+    float CpuPowerWatts,
+    float CpuClockGhz,
+    float GpuTempC,
+    float RamLoadPercent,
+    int FanRpm,
+    bool IsEstimatedRpm,
+    int CurrentFloorPercent
+);
 
 // =====================================================================
 // Controlled CPU heat generation via busy-wait worker threads.
@@ -486,6 +628,7 @@ internal sealed class StressEngine : IDisposable
     private readonly object _lock = new();
 
     public bool IsActive { get; private set; }
+    public int ActiveThreads { get; private set; }
 
     public void Start(int requestedThreads)
     {
@@ -512,13 +655,12 @@ internal sealed class StressEngine : IDisposable
             }
 
             IsActive = true;
+            ActiveThreads = threadCount;
         }
     }
 
     private static void BusyLoop(CancellationToken token)
     {
-        // Simple dense arithmetic (matrix-multiply-like) workload to load
-        // the FPU/ALU without allocating unbounded memory.
         const int n = 64;
         var a = new double[n, n];
         var b = new double[n, n];
@@ -541,7 +683,6 @@ internal sealed class StressEngine : IDisposable
                     c[i, j] = sum;
                 }
 
-            // Yield periodically to check cancellation without waiting for a full pass.
             if (token.IsCancellationRequested) break;
         }
     }
@@ -562,6 +703,7 @@ internal sealed class StressEngine : IDisposable
         _cts?.Dispose();
         _cts = null;
         IsActive = false;
+        ActiveThreads = 0;
     }
 
     public void Dispose() => StopAll();

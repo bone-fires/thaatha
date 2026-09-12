@@ -26,14 +26,25 @@ const deviceNote = document.getElementById("device-note");
 const controlsPanel = document.getElementById("controls-panel");
 const cpuTempEl = document.getElementById("cpu-temp");
 const cpuTempBar = document.getElementById("cpu-temp-bar");
+const tempBadge = document.getElementById("temp-badge");
+
 const fanRpmEl = document.getElementById("fan-rpm");
 const fanRpmBar = document.getElementById("fan-rpm-bar");
+const fanSourceBadge = document.getElementById("fan-source-badge");
+
+const cpuLoadEl = document.getElementById("cpu-load");
+const cpuLoadBar = document.getElementById("cpu-load-bar");
+const cpuPowerEl = document.getElementById("cpu-power");
+const cpuClockEl = document.getElementById("cpu-clock");
+const ramLoadEl = document.getElementById("ram-load");
+const ramLoadBar = document.getElementById("ram-load-bar");
 
 const floorSlider = document.getElementById("floor-slider");
 const floorValue = document.getElementById("floor-value");
 const heatToggle = document.getElementById("heat-toggle");
 const threadSlider = document.getElementById("thread-slider");
 const threadValue = document.getElementById("thread-value");
+const presetBtns = document.querySelectorAll(".btn-preset");
 const emergencyStopBtn = document.getElementById("emergency-stop");
 
 // ---- state ----
@@ -131,6 +142,7 @@ function setConnectedUi(connected) {
     heatToggle.disabled = false;
     threadSlider.disabled = false;
     emergencyStopBtn.disabled = false;
+    presetBtns.forEach(btn => btn.disabled = false);
   } else {
     statusBadge.classList.remove("status-connected");
     statusBadge.classList.add("status-offline");
@@ -145,35 +157,83 @@ function setConnectedUi(connected) {
     heatToggle.checked = false;
     threadSlider.disabled = true;
     emergencyStopBtn.disabled = true;
+    presetBtns.forEach(btn => btn.disabled = true);
 
     cpuTempEl.textContent = "--";
     fanRpmEl.textContent = "--";
+    cpuLoadEl.textContent = "--";
+    cpuPowerEl.textContent = "--";
+    cpuClockEl.textContent = "--";
+    ramLoadEl.textContent = "--";
+
     cpuTempBar.style.width = "0%";
     fanRpmBar.style.width = "0%";
+    cpuLoadBar.style.width = "0%";
+    ramLoadBar.style.width = "0%";
   }
 }
 
 function renderTelemetry(msg) {
+  // 1. CPU Temp
   if (typeof msg.cpuTemp === "number") {
     cpuTempEl.textContent = msg.cpuTemp.toFixed(1);
     const pct = clamp((msg.cpuTemp / TEMP_GAUGE_MAX_C) * 100, 0, 100);
     cpuTempBar.style.width = `${pct}%`;
+
+    if (msg.cpuTemp >= 85) {
+      tempBadge.textContent = "🔥 Meltdown";
+      tempBadge.className = "badge badge-fire";
+    } else if (msg.cpuTemp >= 75) {
+      tempBadge.textContent = "Warning";
+      tempBadge.className = "badge badge-warn";
+    } else {
+      tempBadge.textContent = "Normal";
+      tempBadge.className = "badge badge-normal";
+    }
   }
 
+  // 2. Fan RPM
   if (typeof msg.fanSpeed === "number") {
     fanRpmEl.textContent = msg.fanSpeed.toLocaleString();
     const pct = clamp((msg.fanSpeed / FAN_GAUGE_MAX_RPM) * 100, 0, 100);
     fanRpmBar.style.width = `${pct}%`;
+
+    if (msg.isEstimatedRpm) {
+      fanSourceBadge.textContent = "EST";
+      fanSourceBadge.className = "badge badge-est";
+    } else {
+      fanSourceBadge.textContent = "LIVE";
+      fanSourceBadge.className = "badge badge-live";
+    }
   }
 
-  // Reflect agent-reported state back into the controls, in case another
-  // tab (or the agent's own failsafe) changed something underneath us.
+  // 3. System Vitals (Load, Power, Clock, RAM)
+  if (typeof msg.cpuLoad === "number") {
+    cpuLoadEl.textContent = msg.cpuLoad.toFixed(0);
+    cpuLoadBar.style.width = `${clamp(msg.cpuLoad, 0, 100)}%`;
+  }
+  if (typeof msg.cpuPower === "number") {
+    cpuPowerEl.textContent = msg.cpuPower.toFixed(1);
+  }
+  if (typeof msg.cpuClock === "number") {
+    cpuClockEl.textContent = msg.cpuClock.toFixed(2);
+  }
+  if (typeof msg.ramLoad === "number") {
+    ramLoadEl.textContent = msg.ramLoad.toFixed(0);
+    ramLoadBar.style.width = `${clamp(msg.ramLoad, 0, 100)}%`;
+  }
+
+  // Reflect server state if controls are idle
   if (typeof msg.currentFloor === "number" && document.activeElement !== floorSlider) {
     floorSlider.value = String(msg.currentFloor);
     floorValue.textContent = `${msg.currentFloor}%`;
   }
   if (typeof msg.isHeating === "boolean" && document.activeElement !== heatToggle) {
     heatToggle.checked = msg.isHeating;
+  }
+  if (typeof msg.activeThreads === "number" && msg.activeThreads > 0 && document.activeElement !== threadSlider) {
+    threadSlider.value = String(msg.activeThreads);
+    threadValue.textContent = String(msg.activeThreads);
   }
 }
 
@@ -203,7 +263,6 @@ floorSlider.addEventListener("input", () => {
 threadSlider.addEventListener("input", () => {
   threadValue.textContent = threadSlider.value;
   if (heatToggle.checked) {
-    // live-adjust thread count while heating is active
     send({ type: "toggle_heat", active: true, threads: Number(threadSlider.value) });
   }
 });
@@ -216,16 +275,31 @@ heatToggle.addEventListener("change", () => {
   });
 });
 
+// Quick stress presets
+presetBtns.forEach(btn => {
+  btn.addEventListener("click", () => {
+    const threads = Number(btn.getAttribute("data-threads"));
+    threadSlider.value = String(threads);
+    threadValue.textContent = String(threads);
+    heatToggle.checked = true;
+    send({ type: "toggle_heat", active: true, threads: threads });
+  });
+});
+
+// Comprehensive Emergency Stop (Resets all controls instantly)
 emergencyStopBtn.addEventListener("click", () => {
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
   heatToggle.checked = false;
   floorSlider.value = "0";
   floorValue.textContent = "0%";
+  threadSlider.value = "1";
+  threadValue.textContent = "1";
   send({ type: "emergency_stop" });
 });
 
-// Release the agent's overrides the moment this tab goes away, so the
-// failsafe watchdog on the agent side kicks in immediately rather than
-// waiting for a TCP timeout.
+// Release the agent's overrides the moment this tab goes away
 window.addEventListener("beforeunload", () => {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.close(1000, "tab closed");
