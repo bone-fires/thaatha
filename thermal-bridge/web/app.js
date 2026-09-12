@@ -56,6 +56,17 @@ let reconnectTimer = null;
 const TEMP_GAUGE_MAX_C = 100;
 const FAN_GAUGE_MAX_RPM = 6000;
 
+function updateSliderTrail(slider) {
+  const range = Number(slider.max) - Number(slider.min);
+  const progress = range > 0
+    ? ((Number(slider.value) - Number(slider.min)) / range) * 100
+    : 0;
+  slider.style.setProperty("--slider-progress", `${clamp(progress, 0, 100)}%`);
+}
+
+updateSliderTrail(floorSlider);
+updateSliderTrail(threadSlider);
+
 // =====================================================================
 // Device onboarding notes
 // =====================================================================
@@ -232,6 +243,7 @@ function renderTelemetry(msg) {
   if (typeof msg.currentFloor === "number" && document.activeElement !== floorSlider) {
     floorSlider.value = String(msg.currentFloor);
     floorValue.textContent = `${msg.currentFloor}%`;
+    updateSliderTrail(floorSlider);
   }
   if (typeof msg.isHeating === "boolean" && document.activeElement !== heatToggle) {
     heatToggle.checked = msg.isHeating;
@@ -239,6 +251,7 @@ function renderTelemetry(msg) {
   if (typeof msg.activeThreads === "number" && msg.activeThreads > 0 && document.activeElement !== threadSlider) {
     threadSlider.value = String(msg.activeThreads);
     threadValue.textContent = String(msg.activeThreads);
+    updateSliderTrail(threadSlider);
   }
 }
 
@@ -258,6 +271,7 @@ let floorDebounce = null;
 floorSlider.addEventListener("input", () => {
   const pct = Number(floorSlider.value);
   floorValue.textContent = `${pct}%`;
+  updateSliderTrail(floorSlider);
 
   clearTimeout(floorDebounce);
   floorDebounce = setTimeout(() => {
@@ -267,6 +281,7 @@ floorSlider.addEventListener("input", () => {
 
 threadSlider.addEventListener("input", () => {
   threadValue.textContent = threadSlider.value;
+  updateSliderTrail(threadSlider);
   if (heatToggle.checked) {
     send({ type: "toggle_heat", active: true, threads: Number(threadSlider.value) });
   }
@@ -286,6 +301,7 @@ presetBtns.forEach(btn => {
     const threads = Number(btn.getAttribute("data-threads"));
     threadSlider.value = String(threads);
     threadValue.textContent = String(threads);
+    updateSliderTrail(threadSlider);
     heatToggle.checked = true;
     send({ type: "toggle_heat", active: true, threads: threads });
   });
@@ -301,6 +317,7 @@ emergencyStopBtn.addEventListener("mouseenter", () => {
   cpuLoadEl.textContent = "0";
   floorValue.textContent = "0%";
   floorSlider.value = "0";
+  updateSliderTrail(floorSlider);
 });
 
 emergencyStopBtn.addEventListener("mouseleave", () => {
@@ -320,6 +337,8 @@ emergencyStopBtn.addEventListener("click", () => {
   floorValue.textContent = "0%";
   threadSlider.value = "1";
   threadValue.textContent = "1";
+  updateSliderTrail(floorSlider);
+  updateSliderTrail(threadSlider);
   cpuLoadBar.style.width = "0%";
   cpuLoadEl.textContent = "0";
   send({ type: "emergency_stop" });
